@@ -75,7 +75,7 @@ def show_edit_data(df: pd.DataFrame, data_manager: COADataManager):
                 if row.get('NAME_FIN_STAT_ENG'):
                     st.write(f"**English Name:** {row['NAME_FIN_STAT_ENG']}")
                 st.write(f"**Order:** {row.get('NUM_FIN_STAT_ORDER', 'N/A')}")
-                st.write(f"**Business Unit:** {row.get('FK_BUSINESS_UNIT', 'N/A')}")
+                st.write(f"**Business Unit:** {row.get('PK_BUSINESS_SUBUNIT', 'N/A')}")
             
             with col2:
                 if st.button("✏️ Edit", key=f"edit_{row['CODE_FIN_STAT']}"):
@@ -157,8 +157,20 @@ def show_add_new_item(data_manager: COADataManager, business_unit: str = None):
             name_eng = st.text_input("English Name", placeholder="Account name in English")
             order = st.number_input("Order", min_value=0, value=1000, step=100,
                                   help="Order number (use hundreds apart for easy insertion)")
-            bu = st.text_input("Business Unit", value=business_unit or "DEFAULT", 
-                              help="Business unit identifier")
+            # Choose Business Subunit (defaults to current filter if available)
+            subunit_col = 'PK_BUSINESS_SUBUNIT' if ('PK_BUSINESS_SUBUNIT' in data_manager.data.columns) else None
+            subunit_options = sorted(data_manager.data[subunit_col].dropna().astype(str).unique().tolist()) if subunit_col else []
+            default_bu = st.session_state.get('selected_bu', business_unit)
+            if default_bu in subunit_options:
+                bu_index = subunit_options.index(default_bu)
+            else:
+                bu_index = 0 if subunit_options else 0
+            selected_subunit = st.selectbox(
+                "Business Subunit",
+                options=subunit_options if subunit_options else [''],
+                index=bu_index,
+                help="Target business subunit for the new account"
+            )
         
         # Submit button
         submitted = st.form_submit_button("Add COA Item", type="primary")
@@ -174,8 +186,9 @@ def show_add_new_item(data_manager: COADataManager, business_unit: str = None):
                     'TYPE_FIN_STATEMENT': type_fin_statement,
                     'NAME_FIN_STAT_ENG': name_eng if name_eng else None,
                     'NUM_FIN_STAT_ORDER': order,
-                    'FK_BUSINESS_UNIT': bu
+                    'PK_BUSINESS_SUBUNIT': selected_subunit
                 }
+                # Only PK is used; no FK population
                 
                 # Add to data manager
                 success = data_manager.add_coa_item(new_item, user="current_user")
@@ -184,6 +197,9 @@ def show_add_new_item(data_manager: COADataManager, business_unit: str = None):
                     # Use session state to show persistent message
                     st.session_state['item_added'] = True
                     st.session_state['added_item_code'] = code
+                    # Persist filters so the new item is visible
+                    st.session_state['selected_bu'] = selected_subunit
+                    st.session_state['selected_fin_stmt'] = type_fin_statement
                 else:
                     st.error("❌ Failed to add COA item")
             else:
@@ -520,8 +536,41 @@ def show_edit_account_popup(account_code: str, data_manager: COADataManager):
                                     placeholder="Account name in English")
             order = st.number_input("Order", min_value=0, value=int(current_data.get('NUM_FIN_STAT_ORDER', 1000)), 
                                    step=100, help="Order number (use hundreds apart for easy insertion)")
-            business_unit = st.text_input("Business Unit", value=current_data.get('FK_BUSINESS_UNIT', ''), 
-                                         help="Business unit (read-only)", disabled=True)
+            # FININ_CODE_FIN_STAT selector filtered by GRP01 and NFLAG_IS_LEAF = 1
+            finin_bs_options = []
+            finin_pl_options = []
+            try:
+                df_opts = data_manager.data
+                if df_opts is not None and 'FININ_CODE_FIN_STAT' in df_opts.columns:
+                    df_opts = df_opts.copy()
+                    df_opts['FININ_CODE_FIN_STAT'] = df_opts['FININ_CODE_FIN_STAT'].astype(str)
+                    # Filter by GRP01 present in PK_BUSINESS_SUBUNIT (fallback to FK if needed)
+                    pk_col = 'PK_BUSINESS_SUBUNIT' if 'PK_BUSINESS_SUBUNIT' in df_opts.columns else None
+                    grp_mask = df_opts[pk_col].astype(str).str.contains('GRP01', na=False) if pk_col else True
+                    # Filter for leaf nodes
+                    if 'NFLAG_IS_LEAF' in df_opts.columns:
+                        leaf_mask = (df_opts['NFLAG_IS_LEAF'] == 1) | (df_opts['NFLAG_IS_LEAF'] == '1')
+                    else:
+                        leaf_mask = True
+                    df_grp = df_opts[grp_mask & leaf_mask]
+                    if 'TYPE_FIN_STATEMENT' in df_grp.columns:
+                        finin_bs_options = sorted(df_grp[df_grp['TYPE_FIN_STATEMENT'] == 'BS']['FININ_CODE_FIN_STAT'].dropna().unique().tolist())
+                        finin_pl_options = sorted(df_grp[df_grp['TYPE_FIN_STATEMENT'] == 'PL']['FININ_CODE_FIN_STAT'].dropna().unique().tolist())
+            except Exception:
+                pass
+            finin_options = finin_bs_options if type_fin_statement == 'BS' else finin_pl_options
+            finin_options = [''] + finin_options
+            current_finin = str(current_data.get('FININ_CODE_FIN_STAT', '') or '')
+            try:
+                finin_index = finin_options.index(current_finin) if current_finin in finin_options else 0
+            except Exception:
+                finin_index = 0
+            finin_code = st.selectbox(
+                "FININ_CODE_FIN_STAT",
+                options=finin_options,
+                index=finin_index,
+                help="Central FININ code filtered by GRP01 and leaf nodes (per statement type)"
+            )
         
         # Submit and Cancel buttons
         col1, col2, col3 = st.columns([1, 1, 2])
@@ -545,7 +594,8 @@ def show_edit_account_popup(account_code: str, data_manager: COADataManager):
                     'TYPE_ACCOUNT': type_account,
                     'TYPE_FIN_STATEMENT': type_fin_statement,
                     'NAME_FIN_STAT_ENG': name_eng if name_eng else None,
-                    'NUM_FIN_STAT_ORDER': order
+                    'NUM_FIN_STAT_ORDER': order,
+                    'FININ_CODE_FIN_STAT': finin_code if finin_code else None
                 }
                 
                 # Update the account
@@ -610,7 +660,17 @@ def show_add_child_popup(parent_code: str, data_manager: COADataManager):
     
     # Get the business unit and financial statement type from the parent
     parent_data = data_manager.data[data_manager.data['CODE_FIN_STAT'] == parent_code]
-    business_unit = parent_data.iloc[0]['FK_BUSINESS_UNIT'] if not parent_data.empty else None
+    # Prefer the parent row within the currently selected subunit to avoid cross-subunit collisions
+    _current_bu = st.session_state.get('selected_bu')
+    if _current_bu and 'PK_BUSINESS_SUBUNIT' in data_manager.data.columns:
+        _scoped = parent_data[parent_data['PK_BUSINESS_SUBUNIT'] == _current_bu]
+        if not _scoped.empty:
+            parent_data = _scoped
+    if not parent_data.empty:
+        _parent_row = parent_data.iloc[0].to_dict()
+        business_unit = _parent_row.get('PK_BUSINESS_SUBUNIT')
+    else:
+        business_unit = None
     parent_fin_statement = parent_data.iloc[0]['TYPE_FIN_STATEMENT'] if not parent_data.empty else None
     
     st.info(f"Adding child account under: **{parent_code}** (Statement Type: **{parent_fin_statement}** - inherited from parent)")
@@ -652,8 +712,14 @@ def show_add_child_popup(parent_code: str, data_manager: COADataManager):
             if code and name and type_account and type_fin_statement:
                 # Get the business unit from the parent
                 parent_data = data_manager.data[data_manager.data['CODE_FIN_STAT'] == parent_code]
+                _current_bu = st.session_state.get('selected_bu')
+                if _current_bu and 'PK_BUSINESS_SUBUNIT' in data_manager.data.columns:
+                    _scoped = parent_data[parent_data['PK_BUSINESS_SUBUNIT'] == _current_bu]
+                    if not _scoped.empty:
+                        parent_data = _scoped
                 if not parent_data.empty:
-                    business_unit = parent_data.iloc[0]['FK_BUSINESS_UNIT']
+                    _parent_row = parent_data.iloc[0].to_dict()
+                    business_unit = _parent_row.get('PK_BUSINESS_SUBUNIT', "DEFAULT")
                 else:
                     business_unit = "DEFAULT"
                 
@@ -666,13 +732,17 @@ def show_add_child_popup(parent_code: str, data_manager: COADataManager):
                     'TYPE_FIN_STATEMENT': type_fin_statement,
                     'NAME_FIN_STAT_ENG': name_eng if name_eng else None,
                     'NUM_FIN_STAT_ORDER': order,
-                    'FK_BUSINESS_UNIT': business_unit
+                    'PK_BUSINESS_SUBUNIT': business_unit
                 }
+                # Only PK is used; no FK population
                 
                 # Add to data manager
                 success = data_manager.add_coa_item(new_item, user="current_user")
                 if success:
                     st.success(f"✅ Child account '{code}' added successfully!")
+                    # Preserve filters so the new child is visible immediately
+                    st.session_state['selected_bu'] = business_unit
+                    st.session_state['selected_fin_stmt'] = type_fin_statement
                     # Clear all dialog states
                     st.session_state.active_dialog = None
                     for key in list(st.session_state.keys()):
@@ -740,7 +810,7 @@ def show_delete_confirmation_popup(account_code: str, data_manager: COADataManag
     - **Code:** {current_data.get('CODE_FIN_STAT', 'N/A')}
     - **Name:** {current_data.get('NAME_FIN_STAT', 'N/A')}
     - **Type:** {current_data.get('TYPE_ACCOUNT', 'N/A')} | **Statement:** {current_data.get('TYPE_FIN_STATEMENT', 'N/A')}
-    - **Business Unit:** {current_data.get('FK_BUSINESS_UNIT', 'N/A')}
+    - **Business Unit:** {current_data.get('PK_BUSINESS_SUBUNIT', 'N/A')}
     """)
     
     # Check for children

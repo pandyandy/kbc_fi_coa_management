@@ -34,7 +34,7 @@ class COADataManager:
         self.session_changes: pd.DataFrame = pd.DataFrame(columns=[
             'action',
             'timestamp',
-            'FK_BUSINESS_UNIT',
+            'PK_BUSINESS_SUBUNIT',
             'NUM_FIN_STAT_ORDER',
             'CODE_FIN_STAT',
             'NAME_FIN_STAT',
@@ -53,15 +53,15 @@ class COADataManager:
             if not self._can_use_keboola():
                 raise RuntimeError("Keboola credentials not configured. Please set 'kbc_url' and 'kbc_token' in .streamlit/secrets.toml")
             
-            df = self._read_from_keboola("in.c-keboola-ex-google-drive-01k7haj8zpdqrevsrchqxx4p87.KBC_COA_INPUT")
+            df = self._read_from_keboola("out.c-002_consolidation_coa.DC_COA")
             self.original_data = df.copy()
             
             # Standardize column names
             df.columns = df.columns.str.upper()
             
-            # Add business unit if not present (default to 'DEFAULT')
-            if 'FK_BUSINESS_UNIT' not in df.columns:
-                df['FK_BUSINESS_UNIT'] = 'DEFAULT'
+            # Ensure PK business subunit column exists
+            if 'PK_BUSINESS_SUBUNIT' not in df.columns:
+                df['PK_BUSINESS_SUBUNIT'] = None
             
             # Ensure required columns exist
             required_columns = [
@@ -81,7 +81,7 @@ class COADataManager:
             df['HIERARCHY_LEVEL'] = self._calculate_hierarchy_levels(df)
             
             self.data = df
-            self.business_units = df['FK_BUSINESS_UNIT'].unique().tolist()
+            self.business_units = df['PK_BUSINESS_SUBUNIT'].unique().tolist()
             
             return df
             
@@ -139,7 +139,7 @@ class COADataManager:
     def get_business_units(self) -> List[str]:
         """Get list of available business units"""
         if self.data is not None:
-            return self.data['FK_BUSINESS_UNIT'].unique().tolist()
+            return self.data['PK_BUSINESS_SUBUNIT'].unique().tolist()
         return []
     
     def get_flat_data(self) -> pd.DataFrame:
@@ -153,7 +153,7 @@ class COADataManager:
         if self.data is None:
             return pd.DataFrame()
         
-        return self.data[self.data['FK_BUSINESS_UNIT'] == business_unit].copy()
+        return self.data[self.data['PK_BUSINESS_SUBUNIT'] == business_unit].copy()
     
     def get_hierarchical_structure(self, business_unit: str = None, fin_statement: str = None) -> Dict[str, Any]:
         """Get hierarchical structure of COA data"""
@@ -214,7 +214,7 @@ class COADataManager:
         # Filter by business unit if provided
         df = self.data
         if business_unit:
-            df = df[df['FK_BUSINESS_UNIT'] == business_unit]
+            df = df[df['PK_BUSINESS_SUBUNIT'] == business_unit]
         
         # Find all children of the parent
         children = df[df['CODE_PARENT_FIN_STAT'] == parent_code]
@@ -277,9 +277,9 @@ class COADataManager:
         if not pl_violations.empty:
             errors.append(f"Profit & Loss accounts (R, C) must have TYPE_FIN_STATEMENT = 'PL'. Found {len(pl_violations)} violations.")
         
-        # Rule 3: Check for duplicate codes within business unit
-        if 'FK_BUSINESS_UNIT' in df.columns:
-            duplicates = df.groupby(['FK_BUSINESS_UNIT', 'CODE_FIN_STAT']).size()
+        # Rule 3: Check for duplicate codes within business subunit
+        if 'PK_BUSINESS_SUBUNIT' in df.columns:
+            duplicates = df.groupby(['PK_BUSINESS_SUBUNIT', 'CODE_FIN_STAT']).size()
             duplicates = duplicates[duplicates > 1]
             if not duplicates.empty:
                 errors.append(f"Duplicate CODE_FIN_STAT found within business units: {duplicates.index.tolist()}")
@@ -304,10 +304,10 @@ class COADataManager:
             
             # Check for duplicate codes within the same business unit
             if self.data is not None and not self.data.empty:
-                business_unit = item_data.get('FK_BUSINESS_UNIT', 'DEFAULT')
+                business_unit = item_data.get('PK_BUSINESS_SUBUNIT', None)
                 existing_codes = self.data[
                     (self.data['CODE_FIN_STAT'] == item_data['CODE_FIN_STAT']) & 
-                    (self.data['FK_BUSINESS_UNIT'] == business_unit)
+                    (self.data['PK_BUSINESS_SUBUNIT'] == business_unit)
                 ]
                 if not existing_codes.empty:
                     raise ValueError(f"Code '{item_data['CODE_FIN_STAT']}' already exists in business unit '{business_unit}'. Please use a unique code within this business unit.")
@@ -365,12 +365,12 @@ class COADataManager:
             # Check for duplicate codes within the same business unit (if code is being updated)
             if 'CODE_FIN_STAT' in updates:
                 new_code = updates['CODE_FIN_STAT']
-                business_unit = updates.get('FK_BUSINESS_UNIT', old_values.get('FK_BUSINESS_UNIT', 'DEFAULT'))
+                business_unit = updates.get('PK_BUSINESS_SUBUNIT', old_values.get('PK_BUSINESS_SUBUNIT', None))
                 
                 # Check if the new code already exists in the same business unit (excluding current item)
                 existing_codes = self.data[
                     (self.data['CODE_FIN_STAT'] == new_code) & 
-                    (self.data['FK_BUSINESS_UNIT'] == business_unit) &
+                    (self.data['PK_BUSINESS_SUBUNIT'] == business_unit) &
                     (self.data['CODE_FIN_STAT'] != code)  # Exclude current item
                 ]
                 if not existing_codes.empty:
@@ -485,7 +485,7 @@ class COADataManager:
         change = {
             'action': action,
             'timestamp': datetime.now().isoformat(),
-            'FK_BUSINESS_UNIT': row_data.get('FK_BUSINESS_UNIT'),
+            'PK_BUSINESS_SUBUNIT': row_data.get('PK_BUSINESS_SUBUNIT'),
             'NUM_FIN_STAT_ORDER': row_data.get('NUM_FIN_STAT_ORDER'),
             'CODE_FIN_STAT': row_data.get('CODE_FIN_STAT'),
             'NAME_FIN_STAT': row_data.get('NAME_FIN_STAT'),
@@ -538,7 +538,7 @@ class COADataManager:
             
             # Update data
             self.data = df
-            self.business_units = df['FK_BUSINESS_UNIT'].unique().tolist()
+            self.business_units = df['PK_BUSINESS_SUBUNIT'].unique().tolist()
             
             return True
             

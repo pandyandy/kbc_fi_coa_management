@@ -287,9 +287,9 @@ class COATransformer:
         if business_subunits is None:
             raise ValueError("Business subunits must be loaded first. Call load_business_subunits() first.")
         
-        # Filter business subunits for the specified business unit
+        # Filter business subunits for the specified business subunit (using PK)
         filtered_subunits = business_subunits[
-            business_subunits['FK_BUSINESS_UNIT'] == business_unit_code
+            business_subunits['PK_BUSINESS_SUBUNIT'] == business_unit_code
         ][['PK_BUSINESS_SUBUNIT']]
         
         # Cross join
@@ -315,9 +315,9 @@ class COATransformer:
         if business_subunits is None:
             raise ValueError("Business subunits must be loaded first.")
         
-        # Filter business subunits for the specified business unit
+        # Filter business subunits for the specified business subunit (using PK)
         filtered_subunits = business_subunits[
-            business_subunits['FK_BUSINESS_UNIT'] == business_unit_code
+            business_subunits['PK_BUSINESS_SUBUNIT'] == business_unit_code
         ][['PK_BUSINESS_SUBUNIT']]
         
         # Prepare base data

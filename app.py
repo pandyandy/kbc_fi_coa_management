@@ -81,7 +81,10 @@ def show_account_hierarchy(data_manager: COADataManager, account_code: str, busi
     
     # Filter to the specific business unit and financial statement
     if business_unit and fin_statement:
-        df = df[(df['FK_BUSINESS_UNIT'] == business_unit) & (df['TYPE_FIN_STATEMENT'] == fin_statement)]
+        if 'PK_BUSINESS_SUBUNIT' in df.columns:
+            df = df[(df['PK_BUSINESS_SUBUNIT'] == business_unit) & (df['TYPE_FIN_STATEMENT'] == fin_statement)]
+        elif 'FK_BUSINESS_UNIT' in df.columns:
+            df = df[(df['FK_BUSINESS_UNIT'] == business_unit) & (df['TYPE_FIN_STATEMENT'] == fin_statement)]
     
     # Find the selected account
     selected_account = df[df['CODE_FIN_STAT'] == account_code]
@@ -116,29 +119,8 @@ def show_merged_editor(data_manager: COADataManager):
         except Exception:
             pass
     
-    # Custom CSS for button alignment
-    st.markdown("""
-    <style>
-    .stButton > button {
-        height: 38px !important;
-        vertical-align: top !important;
-    }
-    .stButton > button[kind="primary"] {
-        background-color: #297cf7 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 4px !important;
-        height: 38px !important;
-        vertical-align: top !important;
-    }
-    .stButton > button[kind="primary"]:hover {
-        background-color: #1e5bb8 !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Status and controls
-    top_col1, top_col2, top_col3 = st.columns([1, 1, 6])
+        # Status and controls
+    top_col1, top_col2, top_col3 = st.columns([1.5, 1.5, 6])
     
     # Show unsaved changes indicator
     if st.session_state.get('has_unsaved_changes', False):
@@ -149,7 +131,7 @@ def show_merged_editor(data_manager: COADataManager):
         st.error("⚠️ You have unsaved changes! Refreshing will lose all unconfirmed changes. Click Refresh again to confirm.")
     
     with top_col1:
-        if st.button("🔄 Refresh from Keboola"):
+        if st.button("🔄 Refresh from Keboola", type="secondary", use_container_width=True):
             # Check for unsaved changes
             if st.session_state.get('has_unsaved_changes', False):
                 if not st.session_state.get('confirm_refresh', False):
@@ -183,7 +165,7 @@ def show_merged_editor(data_manager: COADataManager):
     
     with top_col2:
         
-        if st.button("💾 Save to Keboola", type="primary", disabled=not st.session_state.get('has_unsaved_changes', False)):
+        if st.button("💾 Save to Keboola", type="primary", disabled=not st.session_state.get('has_unsaved_changes', False), use_container_width=True):
             st.error("❌ Save to Keboola functionality is not implemented yet")
             # TODO: Implement actual save to Keboola
             # For now, just mark as saved
@@ -230,25 +212,43 @@ def show_merged_editor(data_manager: COADataManager):
     
     with col1:
         # Business Unit Selector
-        business_units = sorted(df['FK_BUSINESS_UNIT'].unique().tolist())
+        bu_col = 'PK_BUSINESS_SUBUNIT' if 'PK_BUSINESS_SUBUNIT' in df.columns else ('FK_BUSINESS_UNIT' if 'FK_BUSINESS_UNIT' in df.columns else None)
+        business_units = sorted(df[bu_col].unique().tolist()) if bu_col else []
+        default_bu = st.session_state.get('selected_bu')
+        if default_bu in business_units:
+            bu_index = business_units.index(default_bu)
+        else:
+            bu_index = 0 if business_units else None
         selected_bu = st.selectbox(
-            "Business Unit:",
+            "Business Subunit:",
             options=business_units,
-            help="Choose a business unit to edit its Chart of Accounts"
+            index=bu_index if bu_index is not None else 0,
+            help="Choose a business subunit to edit its Chart of Accounts"
         )
+        # Persist current selection in session state
+        st.session_state['selected_bu'] = selected_bu
     
     with col2:
         # Financial Statement Type Selector
         fin_statements = sorted(df['TYPE_FIN_STATEMENT'].unique().tolist())
+        default_stmt = st.session_state.get('selected_fin_stmt')
+        if default_stmt in fin_statements:
+            stmt_index = fin_statements.index(default_stmt)
+        else:
+            stmt_index = 0 if fin_statements else None
         selected_fin_stmt = st.selectbox(
             "Statement:",
             options=fin_statements,
+            index=stmt_index if stmt_index is not None else 0,
             help="Choose a financial statement type (BS=Balance Sheet, PL=Profit & Loss)"
         )
+        # Persist current selection in session state
+        st.session_state['selected_fin_stmt'] = selected_fin_stmt
     
     # Filter data by selected business unit and financial statement FIRST
-    df = df[(df['FK_BUSINESS_UNIT'] == selected_bu) & (df['TYPE_FIN_STATEMENT'] == selected_fin_stmt)].copy()
-    
+    if 'PK_BUSINESS_SUBUNIT' in df.columns:
+        df = df[(df['PK_BUSINESS_SUBUNIT'] == selected_bu) & (df['TYPE_FIN_STATEMENT'] == selected_fin_stmt)].copy()
+
     with col3:
         # Searchable dropdown for account selection
         # Get all unique account names for the dropdown, sorted by name for easier searching

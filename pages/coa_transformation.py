@@ -169,9 +169,9 @@ def show_coa_transformation(data_manager: COADataManager):
             transformer = st.session_state.get('transformer')
             business_subunits = st.session_state.get('business_subunits')
             if transformer and business_subunits is not None:
-                # Select business unit
-                business_units = business_subunits['FK_BUSINESS_UNIT'].unique().tolist()
-                selected_bu = st.selectbox("Select Business Unit", business_units)
+                # Select business subunit
+                business_units = business_subunits['PK_BUSINESS_SUBUNIT'].unique().tolist()
+                selected_bu = st.selectbox("Select Business Subunit", business_units)
                 
                 if st.button("Generate Business Subunit COA", use_container_width=True):
                     try:
@@ -199,9 +199,9 @@ def show_coa_transformation(data_manager: COADataManager):
             transformer = st.session_state.get('transformer')
             business_subunits = st.session_state.get('business_subunits')
             if transformer and business_subunits is not None:
-                # Select business unit
-                business_units = business_subunits['FK_BUSINESS_UNIT'].unique().tolist()
-                selected_bu = st.selectbox("Select Business Unit for Mapping", business_units, key="mapping_bu")
+                # Select business subunit
+                business_units = business_subunits['PK_BUSINESS_SUBUNIT'].unique().tolist()
+                selected_bu = st.selectbox("Select Business Subunit for Mapping", business_units, key="mapping_bu")
                 
                 if st.button("Generate Central COA Mapping", use_container_width=True):
                     try:
