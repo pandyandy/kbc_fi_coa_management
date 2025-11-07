@@ -205,6 +205,28 @@ class COADataManager:
             result.append(child_data)
         
         return result
+
+    def get_account_subtree(self, account_code: str, business_unit: str | None = None, fin_statement: str | None = None) -> Optional[Dict[str, Any]]:
+        """Return a subtree structure for any account code (not only roots).
+
+        The returned node shape matches hierarchy nodes used by display_hierarchy_item:
+        { 'data': <row as dict>, 'children': [ ... same shape ... ] }
+        """
+        if self.data is None or self.data.empty:
+            return None
+        df = self.filter_by_business_unit(business_unit) if business_unit else self.data
+        if df is None or df.empty:
+            return None
+        if fin_statement and 'TYPE_FIN_STATEMENT' in df.columns:
+            df = df[df['TYPE_FIN_STATEMENT'] == fin_statement]
+        item = df[df['CODE_FIN_STAT'] == account_code]
+        if item.empty:
+            return None
+        node = {
+            'data': item.iloc[0].to_dict(),
+            'children': self._build_children_structure(df, account_code)
+        }
+        return node
     
     def get_next_order_for_parent(self, parent_code: str, business_unit: str = None) -> int:
         """Get the next order value for a child under the given parent"""

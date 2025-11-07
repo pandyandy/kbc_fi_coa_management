@@ -813,13 +813,36 @@ def show_delete_confirmation_popup(account_code: str, data_manager: COADataManag
     - **Business Unit:** {current_data.get('PK_BUSINESS_SUBUNIT', 'N/A')}
     """)
     
-    # Check for children
-    children = data_manager.data[data_manager.data['CODE_PARENT_FIN_STAT'] == account_code]
-    if not children.empty:
-        st.error(f"❌ **Cannot delete account with {len(children)} child accounts!**")
-        st.write("**Child accounts that must be deleted first:**")
-        for _, child in children.iterrows():
-            st.write(f"- {child['CODE_FIN_STAT']}: {child['NAME_FIN_STAT']}")
+    # Check for descendants (all levels) scoped to the same subunit (and statement if available)
+    parent_subunit = current_data.get('PK_BUSINESS_SUBUNIT')
+    parent_stmt = current_data.get('TYPE_FIN_STATEMENT')
+    df_scope = data_manager.data
+    if parent_subunit is not None and 'PK_BUSINESS_SUBUNIT' in df_scope.columns:
+        df_scope = df_scope[df_scope['PK_BUSINESS_SUBUNIT'] == parent_subunit]
+    if parent_stmt is not None and 'TYPE_FIN_STATEMENT' in df_scope.columns:
+        df_scope = df_scope[df_scope['TYPE_FIN_STATEMENT'] == parent_stmt]
+
+    descendants = []
+    visited = set([account_code])
+    queue = [account_code]
+    while queue:
+        current = queue.pop(0)
+        direct_children = df_scope[df_scope['CODE_PARENT_FIN_STAT'] == current]
+        for _, row in direct_children.iterrows():
+            child_code = row['CODE_FIN_STAT']
+            if child_code not in visited:
+                visited.add(child_code)
+                descendants.append(row)
+                queue.append(child_code)
+
+    if len(descendants) > 0:
+        st.error(f"❌ **Cannot delete account with {len(descendants)} descendant account(s)!**")
+        st.write("**Accounts that must be deleted first (direct or indirect children):**")
+        # Show up to first 50 for readability
+        for row in descendants[:50]:
+            st.write(f"- {row['CODE_FIN_STAT']}: {row['NAME_FIN_STAT']}")
+        if len(descendants) > 50:
+            st.write(f"… and {len(descendants) - 50} more …")
         st.stop()
     
     with st.form(f"delete_confirmation_form_{account_code}"):

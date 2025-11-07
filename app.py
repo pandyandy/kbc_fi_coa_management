@@ -94,18 +94,18 @@ def show_account_hierarchy(data_manager: COADataManager, account_code: str, busi
     
     account_info = selected_account.iloc[0]
     
-    # Get the complete hierarchical structure starting from this account
-    hierarchy = data_manager.get_hierarchical_structure(business_unit, fin_statement)
-    
-    if not hierarchy or account_code not in hierarchy:
+    # Build subtree directly for the selected account
+    subtree = data_manager.get_account_subtree(account_code, business_unit, fin_statement)
+    if not subtree:
         st.info("This account has no child accounts.")
         return
-    
-    # Display the complete hierarchy using the same format as the original
+    # If children list is empty, explicitly say so
+    if not subtree.get('children'):
+        st.info("This account has no child accounts.")
+        return
+    # Display the subtree using the same renderer
     st.markdown(f"**Hierarchy for {account_info['CODE_FIN_STAT']} - {account_info['NAME_FIN_STAT']}:**")
-    
-    # Use the same display function as the original hierarchy view
-    display_hierarchy_item(hierarchy[account_code], 0, "", data_manager)
+    display_hierarchy_item(subtree, 0, "", data_manager)
 
 def show_merged_editor(data_manager: COADataManager):
     """Merged editor that combines dashboard and editor functionality"""
