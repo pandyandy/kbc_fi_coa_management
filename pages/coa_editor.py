@@ -434,22 +434,39 @@ def display_hierarchy_item(item_data: Dict, level: int, parent_path: str = "", d
     if children:
         expander_title += f" ({len(children)} children)"
     
-    with st.expander(expander_title, expanded=False):
+    # Persist expanded state across reruns using session_state
+    if 'expanded_nodes' not in st.session_state:
+        st.session_state['expanded_nodes'] = set()
+    try:
+        expanded_nodes = set(st.session_state.get('expanded_nodes', set()))
+    except Exception:
+        expanded_nodes = set()
+        st.session_state['expanded_nodes'] = expanded_nodes
+    is_expanded = data['CODE_FIN_STAT'] in expanded_nodes
+    
+    with st.expander(expander_title, expanded=is_expanded):
         # Action buttons with proper container width
         col1, col2, col3 = st.columns([1, 1, 1])
         
         with col1:
             if st.button("✏️ Edit", key=f"edit_{data['CODE_FIN_STAT']}", help=f"Edit account {data['CODE_FIN_STAT']}", use_container_width=True):
+                # Keep current path expanded after rerun
+                path_nodes = set(current_path.split('/')) if current_path else {data['CODE_FIN_STAT']}
+                st.session_state['expanded_nodes'] = set(expanded_nodes).union(path_nodes)
                 st.session_state[f"show_edit_account_{data['CODE_FIN_STAT']}"] = True
                 st.rerun()
         
         with col2:
             if st.button("🗑️ Delete", key=f"delete_{data['CODE_FIN_STAT']}", help=f"Delete account {data['CODE_FIN_STAT']}", type="secondary", use_container_width=True):
+                path_nodes = set(current_path.split('/')) if current_path else {data['CODE_FIN_STAT']}
+                st.session_state['expanded_nodes'] = set(expanded_nodes).union(path_nodes)
                 st.session_state[f"show_delete_confirm_{data['CODE_FIN_STAT']}"] = True
                 st.rerun()
         
         with col3:
             if st.button("➕ Add Child", key=f"add_child_{data['CODE_FIN_STAT']}", help=f"Add a new child account under {data['CODE_FIN_STAT']}", use_container_width=True):
+                path_nodes = set(current_path.split('/')) if current_path else {data['CODE_FIN_STAT']}
+                st.session_state['expanded_nodes'] = set(expanded_nodes).union(path_nodes)
                 st.session_state[f"show_add_child_{data['CODE_FIN_STAT']}"] = True
                 st.rerun()
         
@@ -793,8 +810,18 @@ def show_delete_confirmation_popup(account_code: str, data_manager: COADataManag
     </style>
     """, unsafe_allow_html=True)
     
-    # Get account data for display
+    # Get account data for display (scoped to current filters)
     account_data = data_manager.data[data_manager.data['CODE_FIN_STAT'] == account_code]
+    sel_bu = st.session_state.get('selected_bu')
+    sel_stmt = st.session_state.get('selected_fin_stmt')
+    if sel_bu and 'PK_BUSINESS_SUBUNIT' in data_manager.data.columns:
+        scoped = account_data[account_data['PK_BUSINESS_SUBUNIT'] == sel_bu]
+        if not scoped.empty:
+            account_data = scoped
+    if sel_stmt and 'TYPE_FIN_STATEMENT' in data_manager.data.columns:
+        scoped_stmt = account_data[account_data['TYPE_FIN_STATEMENT'] == sel_stmt]
+        if not scoped_stmt.empty:
+            account_data = scoped_stmt
     if account_data.empty:
         st.error(f"Account '{account_code}' not found")
         return
@@ -810,7 +837,7 @@ def show_delete_confirmation_popup(account_code: str, data_manager: COADataManag
     - **Code:** {current_data.get('CODE_FIN_STAT', 'N/A')}
     - **Name:** {current_data.get('NAME_FIN_STAT', 'N/A')}
     - **Type:** {current_data.get('TYPE_ACCOUNT', 'N/A')} | **Statement:** {current_data.get('TYPE_FIN_STATEMENT', 'N/A')}
-    - **Business Unit:** {current_data.get('PK_BUSINESS_SUBUNIT', 'N/A')}
+    - **Business Unit:** {sel_bu or current_data.get('PK_BUSINESS_SUBUNIT', 'N/A')}
     """)
     
     # Check for descendants (all levels) scoped to the same subunit (and statement if available)

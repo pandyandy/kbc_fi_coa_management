@@ -7,7 +7,17 @@ import streamlit as st
 import streamlit_nested_layout
 import hydralit_components as hc
 import pandas as pd
-from pages.coa_editor import show_coa_metrics, show_hierarchy_view, show_search_filter, show_edit_data, show_add_new_item, display_hierarchy_item
+from pages.coa_editor import (
+    show_coa_metrics,
+    show_hierarchy_view,
+    show_search_filter,
+    show_edit_data,
+    show_add_new_item,
+    display_hierarchy_item,
+    show_add_child_popup,
+    show_edit_account_popup,
+    show_delete_confirmation_popup,
+)
 from pages.coa_import_export import show_coa_import_export
 from pages.analytics import show_analytics
 from pages.coa_transformation import show_coa_transformation
@@ -106,6 +116,28 @@ def show_account_hierarchy(data_manager: COADataManager, account_code: str, busi
     # Display the subtree using the same renderer
     st.markdown(f"**Hierarchy for {account_info['CODE_FIN_STAT']} - {account_info['NAME_FIN_STAT']}:**")
     display_hierarchy_item(subtree, 0, "", data_manager)
+
+    # Handle popups for the subtree (search view)
+    def _scan_for_popups(node):
+        data = node.get('data', {})
+        children = node.get('children', [])
+        code = data.get('CODE_FIN_STAT')
+        if code:
+            if st.session_state.get(f"show_add_child_{code}", False):
+                show_add_child_popup(code, data_manager)
+                return True
+            if st.session_state.get(f"show_edit_account_{code}", False):
+                show_edit_account_popup(code, data_manager)
+                return True
+            if st.session_state.get(f"show_delete_confirm_{code}", False):
+                show_delete_confirmation_popup(code, data_manager)
+                return True
+        for child in children:
+            if _scan_for_popups(child):
+                return True
+        return False
+
+    _scan_for_popups(subtree)
 
 def show_merged_editor(data_manager: COADataManager):
     """Merged editor that combines dashboard and editor functionality"""
