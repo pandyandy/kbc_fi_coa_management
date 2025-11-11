@@ -160,7 +160,7 @@ def show_merged_editor(data_manager: COADataManager):
         st.error("⚠️ You have unsaved changes! Refreshing will lose all unconfirmed changes. Click Refresh again to confirm.")
     
     with top_col1:
-        if st.button("🔄 Refresh from Keboola", type="secondary", width='stretch'):
+        if st.button("🔄 Refresh from Keboola", type="secondary", use_container_width=True):
             # Check for unsaved changes
             if st.session_state.get('has_unsaved_changes', False):
                 if not st.session_state.get('confirm_refresh', False):
@@ -194,7 +194,7 @@ def show_merged_editor(data_manager: COADataManager):
     
     with top_col2:
         
-        if st.button("💾 Save to Keboola", type="primary", disabled=not st.session_state.get('has_unsaved_changes', False), width='stretch'):
+        if st.button("💾 Save to Keboola", type="primary", disabled=not st.session_state.get('has_unsaved_changes', False), use_container_width=True):
             # Ensure working data is present before save
             if (data_manager.data is None) or (getattr(data_manager.data, 'empty', True)):
                 try:
@@ -266,7 +266,7 @@ def show_merged_editor(data_manager: COADataManager):
                 st.info("No changes recorded in this session.")
             else:
                 st.write("Latest changes per account:")
-                st.dataframe(df_to_show, width='stretch', height=240)
+                st.dataframe(df_to_show, use_container_width=True, height=240)
 
     # Load only once per session unless refresh requested
     if 'data_loaded' not in st.session_state or st.session_state.get('force_reload', False):
