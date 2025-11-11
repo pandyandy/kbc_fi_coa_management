@@ -522,8 +522,18 @@ def show_edit_account_popup(account_code: str, data_manager: COADataManager):
     """
     st.markdown(hide_submit_message, unsafe_allow_html=True)
     
-    # Get current account data
+    # Get current account data scoped to selected filters to avoid cross-subunit edits
     account_data = data_manager.data[data_manager.data['CODE_FIN_STAT'] == account_code]
+    sel_bu = st.session_state.get('selected_bu')
+    sel_stmt = st.session_state.get('selected_fin_stmt')
+    if sel_bu and 'PK_BUSINESS_SUBUNIT' in data_manager.data.columns:
+        scoped = account_data[account_data['PK_BUSINESS_SUBUNIT'] == sel_bu]
+        if not scoped.empty:
+            account_data = scoped
+    if sel_stmt and 'TYPE_FIN_STATEMENT' in data_manager.data.columns:
+        scoped_stmt = account_data[account_data['TYPE_FIN_STATEMENT'] == sel_stmt]
+        if not scoped_stmt.empty:
+            account_data = scoped_stmt
     if account_data.empty:
         st.error(f"Account '{account_code}' not found")
         return

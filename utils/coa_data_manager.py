@@ -32,8 +32,6 @@ class COADataManager:
             st.session_state['session_id'] = str(uuid.uuid4())
         self.session_id: str = st.session_state['session_id']
         self.session_changes: pd.DataFrame = pd.DataFrame(columns=[
-            'action',
-            'timestamp',
             'PK_BUSINESS_SUBUNIT',
             'NUM_FIN_STAT_ORDER',
             'CODE_FIN_STAT',
@@ -41,7 +39,10 @@ class COADataManager:
             'CODE_PARENT_FIN_STAT',
             'TYPE_ACCOUNT',
             'TYPE_FIN_STATEMENT',
-            'NAME_FIN_STAT_ENG'
+            'NAME_FIN_STAT_ENG',
+            'FININ_CODE_FIN_STAT',
+            'UPDATED_AT',
+            'UPDATED_BY'
         ])
         self.session_changes_file = os.path.join(
             os.getcwd(), 'dev_data', f"session_changes_{self.session_id}.csv"
@@ -113,6 +114,19 @@ class COADataManager:
             return client.read_table(table_id=table)
 
         return _cached_read_table(st.secrets['kbc_url'], st.secrets['kbc_token'], table_id)
+    
+    def _write_to_keboola(self, table_id: str, df: pd.DataFrame, primary_key: List[str]) -> None:
+        """Write a dataframe to Keboola Storage via keboola-streamlit client."""
+        if KeboolaStreamlit is None:
+            raise RuntimeError("keboola-streamlit package not installed")
+        if not self._can_use_keboola():
+            raise RuntimeError("Keboola credentials not configured. Please set 'kbc_url' and 'kbc_token' in .streamlit/secrets.toml")
+        client = KeboolaStreamlit(root_url=st.secrets['kbc_url'], token=st.secrets['kbc_token'])
+        try:
+            client.write_table(table_id=table_id, df=df, is_incremental=False)
+            return
+        except Exception as e:
+            raise RuntimeError(f"Failed to write table to Keboola: {e}")
     
     def _calculate_hierarchy_levels(self, df: pd.DataFrame) -> List[int]:
         """Calculate hierarchy levels for each row"""
@@ -324,6 +338,15 @@ class COADataManager:
                 if field not in item_data or not item_data[field]:
                     raise ValueError(f"Required field {field} is missing")
             
+            # Ensure PK business subunit is set; default to current selection if missing
+            if not item_data.get('PK_BUSINESS_SUBUNIT'):
+                try:
+                    selected_bu = st.session_state.get('selected_bu')
+                    if selected_bu:
+                        item_data['PK_BUSINESS_SUBUNIT'] = selected_bu
+                except Exception:
+                    pass
+            
             # Check for duplicate codes within the same business unit
             if self.data is not None and not self.data.empty:
                 business_unit = item_data.get('PK_BUSINESS_SUBUNIT', None)
@@ -378,6 +401,16 @@ class COADataManager:
         try:
             # Find the item
             mask = self.data['CODE_FIN_STAT'] == code
+            # Scope by current selection to avoid cross-subunit collisions
+            try:
+                selected_bu = st.session_state.get('selected_bu')
+                if selected_bu and 'PK_BUSINESS_SUBUNIT' in self.data.columns:
+                    mask = mask & (self.data['PK_BUSINESS_SUBUNIT'] == selected_bu)
+                selected_stmt = st.session_state.get('selected_fin_stmt')
+                if selected_stmt and 'TYPE_FIN_STATEMENT' in self.data.columns:
+                    mask = mask & (self.data['TYPE_FIN_STATEMENT'] == selected_stmt)
+            except Exception:
+                pass
             if not mask.any():
                 raise ValueError(f"COA item with code {code} not found")
             
@@ -431,6 +464,16 @@ class COADataManager:
             
             # Store old values for audit
             mask = self.data['CODE_FIN_STAT'] == code
+            # Scope by current selection to avoid cross-subunit collisions
+            try:
+                selected_bu = st.session_state.get('selected_bu')
+                if selected_bu and 'PK_BUSINESS_SUBUNIT' in self.data.columns:
+                    mask = mask & (self.data['PK_BUSINESS_SUBUNIT'] == selected_bu)
+                selected_stmt = st.session_state.get('selected_fin_stmt')
+                if selected_stmt and 'TYPE_FIN_STATEMENT' in self.data.columns:
+                    mask = mask & (self.data['TYPE_FIN_STATEMENT'] == selected_stmt)
+            except Exception:
+                pass
             old_values = self.data[mask].iloc[0].to_dict()
             
             # Delete the item
@@ -502,19 +545,123 @@ class COADataManager:
             st.error(f"Error saving COA data: {str(e)}")
             return False
 
+    def save_to_keboola(self) -> Tuple[bool, str]:
+        """Persist the current working COA to Keboola, keyed by PK_BUSINESS_SUBUNIT + CODE_FIN_STAT.
+
+        Returns (success, message).
+        """
+        try:
+            if self.data is None or self.data.empty:
+                return False, "No data to save."
+            # Ensure required PK columns exist
+            pk_cols = ['PK_BUSINESS_SUBUNIT', 'CODE_FIN_STAT']
+            for col in pk_cols:
+                if col not in self.data.columns:
+                    return False, f"Required column missing for primary key: {col}"
+            # Determine target table
+            target_table = "out.c-002_consolidation_coa.DC_COA_INPUT"
+            # Allowed columns to save
+            allowed_cols = [
+                'PK_BUSINESS_SUBUNIT',
+                'NUM_FIN_STAT_ORDER',
+                'CODE_FIN_STAT',
+                'NAME_FIN_STAT',
+                'CODE_PARENT_FIN_STAT',
+                'TYPE_ACCOUNT',
+                'TYPE_FIN_STATEMENT',
+                'NAME_FIN_STAT_ENG',
+                'FININ_CODE_FIN_STAT',
+                'UPDATED_AT',
+                'UPDATED_BY'
+            ]
+            # Read current target table to preserve UPDATED_* for untouched rows
+            try:
+                base_df = self._read_from_keboola(target_table)
+                base_df.columns = base_df.columns.str.upper()
+                base_df = base_df[[c for c in allowed_cols if c in base_df.columns]]
+            except Exception:
+                base_df = pd.DataFrame(columns=allowed_cols)
+            # Build working snapshot, restricted to allowed columns
+            working_df = self.data.copy()
+            if 'HIERARCHY_LEVEL' in working_df.columns:
+                working_df = working_df.drop(columns=['HIERARCHY_LEVEL'])
+            working_df = working_df[[c for c in allowed_cols if c in working_df.columns]].copy()
+            # Ensure required columns present
+            for c in allowed_cols:
+                if c not in working_df.columns:
+                    working_df[c] = None
+            # Identify changed keys from session_changes
+            try:
+                changed_keys: set[Tuple[Any, Any]] = set()
+                if isinstance(self.session_changes, pd.DataFrame) and not self.session_changes.empty:
+                    if all(col in self.session_changes.columns for col in pk_cols):
+                        changed_keys = set(
+                            zip(
+                                self.session_changes['PK_BUSINESS_SUBUNIT'].astype(str),
+                                self.session_changes['CODE_FIN_STAT'].astype(str)
+                            )
+                        )
+            except Exception:
+                changed_keys = set()
+            # Stamp UPDATED_* for changed rows
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            if 'UPDATED_AT' not in working_df.columns:
+                working_df['UPDATED_AT'] = now_str
+            if 'UPDATED_BY' not in working_df.columns:
+                working_df['UPDATED_BY'] = 'stepan.pittauer@keboola.com'
+            if changed_keys:
+                key_series = list(zip(working_df['PK_BUSINESS_SUBUNIT'].astype(str), working_df['CODE_FIN_STAT'].astype(str)))
+                mask_changed = pd.Series(key_series).isin(changed_keys).values
+                working_df.loc[mask_changed, 'UPDATED_AT'] = now_str
+                working_df.loc[mask_changed, 'UPDATED_BY'] = 'stepan.pittauer@keboola.com'
+            # For untouched rows, preserve UPDATED_* from base if available
+            if not base_df.empty and ('UPDATED_AT' in base_df.columns or 'UPDATED_BY' in base_df.columns):
+                preserve_cols = [c for c in ['UPDATED_AT', 'UPDATED_BY'] if c in base_df.columns]
+                if preserve_cols:
+                    merged = working_df.merge(
+                        base_df[pk_cols + preserve_cols],
+                        on=pk_cols,
+                        how='left',
+                        suffixes=('', '_BASE')
+                    )
+                    for c in preserve_cols:
+                        base_col = f"{c}_BASE"
+                        merged[c] = merged[c].where(merged[c].notna(), merged[base_col])
+                    working_df = merged.drop(columns=[f"{c}_BASE" for c in preserve_cols], errors='ignore')
+            # Enforce UPDATED_* per requirement for all rows at save time
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            working_df['UPDATED_AT'] = now_str
+            working_df['UPDATED_BY'] = 'stepan.pittauer@keboola.com'
+            # Finalize columns order
+            df_to_write = working_df[[c for c in allowed_cols if c in working_df.columns]].copy()
+            # Perform write
+            self._write_to_keboola(target_table, df_to_write, primary_key=pk_cols)
+            return True, f"Saved {len(df_to_write)} rows to Keboola ({target_table})."
+        except Exception as e:
+            return False, f"Failed to save to Keboola: {e}"
+
     def _record_session_change(self, action: str, row_data: Dict[str, Any]):
         """Append a change record to in-memory frame and to the session-specific CSV."""
+        # Ensure PK business subunit present in the change record
+        try:
+            pk_bu = row_data.get('PK_BUSINESS_SUBUNIT')
+            if not pk_bu:
+                pk_bu = st.session_state.get('selected_bu')
+        except Exception:
+            pk_bu = row_data.get('PK_BUSINESS_SUBUNIT')
+        # Build change record with required fields only
         change = {
-            'action': action,
-            'timestamp': datetime.now().isoformat(),
-            'PK_BUSINESS_SUBUNIT': row_data.get('PK_BUSINESS_SUBUNIT'),
+            'PK_BUSINESS_SUBUNIT': pk_bu,
             'NUM_FIN_STAT_ORDER': row_data.get('NUM_FIN_STAT_ORDER'),
             'CODE_FIN_STAT': row_data.get('CODE_FIN_STAT'),
             'NAME_FIN_STAT': row_data.get('NAME_FIN_STAT'),
             'CODE_PARENT_FIN_STAT': row_data.get('CODE_PARENT_FIN_STAT'),
             'TYPE_ACCOUNT': row_data.get('TYPE_ACCOUNT'),
             'TYPE_FIN_STATEMENT': row_data.get('TYPE_FIN_STATEMENT'),
-            'NAME_FIN_STAT_ENG': row_data.get('NAME_FIN_STAT_ENG')
+            'NAME_FIN_STAT_ENG': row_data.get('NAME_FIN_STAT_ENG'),
+            'FININ_CODE_FIN_STAT': row_data.get('FININ_CODE_FIN_STAT'),
+            'UPDATED_AT': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'UPDATED_BY': 'stepan.pittauer@keboola.com'
         }
         self.session_changes = pd.concat([self.session_changes, pd.DataFrame([change])], ignore_index=True)
         try:

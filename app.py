@@ -7,6 +7,7 @@ import streamlit as st
 import streamlit_nested_layout
 import hydralit_components as hc
 import pandas as pd
+import os
 from pages.coa_editor import (
     show_coa_metrics,
     show_hierarchy_view,
@@ -107,13 +108,9 @@ def show_account_hierarchy(data_manager: COADataManager, account_code: str, busi
     # Build subtree directly for the selected account
     subtree = data_manager.get_account_subtree(account_code, business_unit, fin_statement)
     if not subtree:
-        st.info("This account has no child accounts.")
+        st.info("This account was not found in the current filter.")
         return
-    # If children list is empty, explicitly say so
-    if not subtree.get('children'):
-        st.info("This account has no child accounts.")
-        return
-    # Display the subtree using the same renderer
+    # Display the subtree (even if there are no children) so actions are available
     st.markdown(f"**Hierarchy for {account_info['CODE_FIN_STAT']} - {account_info['NAME_FIN_STAT']}:**")
     display_hierarchy_item(subtree, 0, "", data_manager)
 
@@ -163,7 +160,7 @@ def show_merged_editor(data_manager: COADataManager):
         st.error("⚠️ You have unsaved changes! Refreshing will lose all unconfirmed changes. Click Refresh again to confirm.")
     
     with top_col1:
-        if st.button("🔄 Refresh from Keboola", type="secondary", use_container_width=True):
+        if st.button("🔄 Refresh from Keboola", type="secondary", width='stretch'):
             # Check for unsaved changes
             if st.session_state.get('has_unsaved_changes', False):
                 if not st.session_state.get('confirm_refresh', False):
@@ -197,12 +194,79 @@ def show_merged_editor(data_manager: COADataManager):
     
     with top_col2:
         
-        if st.button("💾 Save to Keboola", type="primary", disabled=not st.session_state.get('has_unsaved_changes', False), use_container_width=True):
-            st.error("❌ Save to Keboola functionality is not implemented yet")
-            # TODO: Implement actual save to Keboola
-            # For now, just mark as saved
-            st.session_state['has_unsaved_changes'] = False
-            st.success("✅ Changes saved to session (Keboola save pending)")
+        if st.button("💾 Save to Keboola", type="primary", disabled=not st.session_state.get('has_unsaved_changes', False), width='stretch'):
+            # Ensure working data is present before save
+            if (data_manager.data is None) or (getattr(data_manager.data, 'empty', True)):
+                try:
+                    if 'coa_working_data' in st.session_state and st.session_state['coa_working_data'] is not None and not st.session_state['coa_working_data'].empty:
+                        data_manager.data = st.session_state['coa_working_data']
+                    elif 'coa_original_data' in st.session_state and st.session_state['coa_original_data'] is not None and not st.session_state['coa_original_data'].empty:
+                        data_manager.data = st.session_state['coa_original_data']
+                    else:
+                        with st.spinner("Loading COA data from Keboola..."):
+                            data_manager.load_coa_data()
+                except Exception:
+                    pass
+            # Directly save to Keboola - preview is available in the Session Changes panel
+            st.info("Saving current dataset to Keboola...")
+            ok, msg = data_manager.save_to_keboola()
+            if ok:
+                st.success(f"✅ {msg}")
+                st.session_state['has_unsaved_changes'] = False
+            else:
+                st.error(f"❌ {msg}")
+
+    with top_col3:
+        # Always-available view of current session changes
+        try:
+            changes_df = data_manager.session_changes.copy()
+        except Exception:
+            changes_df = None
+        # Fallback: read from session CSV if in-memory frame is empty
+        if (changes_df is None or changes_df.empty) and hasattr(data_manager, 'session_changes_file'):
+            try:
+                if os.path.exists(data_manager.session_changes_file):
+                    changes_df = pd.read_csv(data_manager.session_changes_file)
+            except Exception:
+                pass
+        # Compute latest-only view
+        if changes_df is not None and not changes_df.empty:
+            latest_df = changes_df.copy()
+            try:
+                if 'UPDATED_AT' in latest_df.columns:
+                    latest_df['__ts__'] = pd.to_datetime(latest_df['UPDATED_AT'], errors='coerce')
+                elif 'timestamp' in latest_df.columns:
+                    latest_df['__ts__'] = pd.to_datetime(latest_df['timestamp'], errors='coerce')
+                else:
+                    latest_df['__ts__'] = pd.NaT
+                key_cols = [c for c in ['PK_BUSINESS_SUBUNIT', 'CODE_FIN_STAT'] if c in latest_df.columns]
+                if key_cols:
+                    latest_df = latest_df.sort_values('__ts__').drop_duplicates(subset=key_cols, keep='last')
+                latest_df = latest_df.drop(columns=['__ts__'], errors='ignore')
+            except Exception:
+                latest_df = changes_df
+        else:
+            latest_df = changes_df
+        with st.expander(f"📝 Session Changes", expanded=False):
+            # Optional filter for current selection
+            only_current = st.checkbox(
+                "Only show current selection (subunit/statement)",
+                value=False,
+                key="panel_only_current"
+            )
+            df_to_show = latest_df
+            if only_current and df_to_show is not None and not df_to_show.empty:
+                sel_bu = st.session_state.get('selected_bu')
+                sel_stmt = st.session_state.get('selected_fin_stmt')
+                if sel_bu and 'PK_BUSINESS_SUBUNIT' in df_to_show.columns:
+                    df_to_show = df_to_show[df_to_show['PK_BUSINESS_SUBUNIT'] == sel_bu]
+                if sel_stmt and 'TYPE_FIN_STATEMENT' in df_to_show.columns:
+                    df_to_show = df_to_show[df_to_show['TYPE_FIN_STATEMENT'] == sel_stmt]
+            if df_to_show is None or df_to_show.empty:
+                st.info("No changes recorded in this session.")
+            else:
+                st.write("Latest changes per account:")
+                st.dataframe(df_to_show, width='stretch', height=240)
 
     # Load only once per session unless refresh requested
     if 'data_loaded' not in st.session_state or st.session_state.get('force_reload', False):
