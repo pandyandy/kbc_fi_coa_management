@@ -722,6 +722,32 @@ def show_add_child_popup(parent_code: str, data_manager: COADataManager):
             name_eng = st.text_input("English Name", placeholder="Account name in English")
             order = st.number_input("Order", min_value=0, value=default_order, step=100,
                                    help=f"Order number (default: {default_order}, use hundreds apart for easy insertion)")
+            # FININ_CODE_FIN_STAT selector filtered by PK containing GRP01 and NFLAG_IS_LEAF = 1
+            finin_bs_options = []
+            finin_pl_options = []
+            try:
+                df_opts = data_manager.data
+                if df_opts is not None and 'FININ_CODE_FIN_STAT' in df_opts.columns:
+                    df_opts = df_opts.copy()
+                    df_opts['FININ_CODE_FIN_STAT'] = df_opts['FININ_CODE_FIN_STAT'].astype(str)
+                    pk_col = 'PK_BUSINESS_SUBUNIT' if 'PK_BUSINESS_SUBUNIT' in df_opts.columns else None
+                    grp_mask = df_opts[pk_col].astype(str).str.contains('GRP01', na=False) if pk_col else True
+                    if 'NFLAG_IS_LEAF' in df_opts.columns:
+                        leaf_mask = (df_opts['NFLAG_IS_LEAF'] == 1) | (df_opts['NFLAG_IS_LEAF'] == '1')
+                    else:
+                        leaf_mask = True
+                    df_grp = df_opts[grp_mask & leaf_mask]
+                    if 'TYPE_FIN_STATEMENT' in df_grp.columns:
+                        finin_bs_options = sorted(df_grp[df_grp['TYPE_FIN_STATEMENT'] == 'BS']['FININ_CODE_FIN_STAT'].dropna().unique().tolist())
+                        finin_pl_options = sorted(df_grp[df_grp['TYPE_FIN_STATEMENT'] == 'PL']['FININ_CODE_FIN_STAT'].dropna().unique().tolist())
+            except Exception:
+                pass
+            finin_options = finin_bs_options if type_fin_statement == 'BS' else finin_pl_options
+            finin_code = st.selectbox(
+                "FININ_CODE_FIN_STAT",
+                options=([''] + finin_options) if finin_options else [''],
+                help="Central FININ code filtered by GRP01 and leaf nodes (per statement type)"
+            )
         
         # Submit and Cancel buttons
         col1, col2, col3 = st.columns([1, 1, 2])
@@ -759,7 +785,8 @@ def show_add_child_popup(parent_code: str, data_manager: COADataManager):
                     'TYPE_FIN_STATEMENT': type_fin_statement,
                     'NAME_FIN_STAT_ENG': name_eng if name_eng else None,
                     'NUM_FIN_STAT_ORDER': order,
-                    'PK_BUSINESS_SUBUNIT': business_unit
+                    'PK_BUSINESS_SUBUNIT': business_unit,
+                    'FININ_CODE_FIN_STAT': finin_code if finin_code else None
                 }
                 # Only PK is used; no FK population
                 
