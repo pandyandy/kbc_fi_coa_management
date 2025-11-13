@@ -40,8 +40,8 @@ def main():
     
     # Create navigation menu
     menu_data = [
-        {'label': "Import/Export"},
-        {'label': "Transform"},
+       # {'label': "Import/Export"},
+       # {'label': "Transform"},
         {'label': "Analytics"},
     ]
     
