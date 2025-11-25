@@ -1,11 +1,9 @@
 """
 Professional COA Management App with Keboola Branding
-Main application entry point with Hydralit navigation
+Main application entry point with Streamlit navigation
 """
 
 import streamlit as st
-import streamlit_nested_layout
-import hydralit_components as hc
 import pandas as pd
 import os
 from pages.coa_editor import (
@@ -38,43 +36,28 @@ data_manager = COADataManager()
 def main():
     """Main application function"""
     
-    # Create navigation menu
-    menu_data = [
-       # {'label': "Import/Export"},
-       # {'label': "Transform"},
-        {'label': "Analytics"},
-    ]
-    
-    # Create Hydralit navigation
-    menu_id = hc.nav_bar(
-        menu_definition=menu_data,
-        override_theme={
-            'txc_inactive': '#FFFFFF',
-            'menu_background': '#297cf7',
-            'txc_active': '#000000',
-            'option_active': '#FFFFFF'
-        },
-        home_name='Editor',
-        login_name=None,
-        hide_streamlit_markers=True,
-        sticky_nav=True,
-        sticky_mode='pinned'
-    )
-    
-    # Route to appropriate page
-    if menu_id == "Editor" or menu_id is None:
+    # Define pages using Streamlit navigation
+    def page_editor():
         show_merged_editor(data_manager)
-    elif menu_id == "Import/Export":
-        show_coa_import_export(data_manager)
-    elif menu_id == "Transform":
-        show_coa_transformation(data_manager)
-    elif menu_id == "Analytics":
+
+    def page_analytics():
         show_analytics(data_manager)
-    elif menu_id == "Settings":
-        show_settings()
-    else:
-        # Default to Editor for any other navigation
-        show_merged_editor(data_manager)
+
+    # If you want to expose additional tools later, uncomment below:
+    # def page_import_export():
+    #     show_coa_import_export(data_manager)
+    # def page_transform():
+    #     show_coa_transformation(data_manager)
+
+    pages = [
+        st.Page(page_editor, title="Editor", icon="📝"),
+        st.Page(page_analytics, title="Analytics", icon="📈"),
+        # st.Page(page_import_export, title="Import/Export", icon="⬆️⬇️"),
+        # st.Page(page_transform, title="Transform", icon="🛠️"),
+    ]
+
+    pg = st.navigation(pages, position="top")
+    pg.run()
 
 def show_account_hierarchy(data_manager: COADataManager, account_code: str, business_unit: str = None, fin_statement: str = None):
     """Show complete hierarchy for a specific account (including all sub-children)"""
