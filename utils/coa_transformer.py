@@ -28,8 +28,8 @@ class COATransformer:
         """Initialize Keboola client if credentials are available"""
         try:
             if KeboolaStreamlit and hasattr(st, 'secrets'):
-                kbc_url = st.secrets.get('kbc_url')
-                kbc_token = st.secrets.get('kbc_token')
+                kbc_url = st.secrets.get('keboola_url')
+                kbc_token = st.secrets.get('keboola_token')
                 if kbc_url and kbc_token:
                     self.keboola_client = KeboolaStreamlit(kbc_url, kbc_token)
         except Exception:

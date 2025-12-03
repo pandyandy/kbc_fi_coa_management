@@ -52,7 +52,7 @@ class COADataManager:
         """Load COA data from Keboola only (no CSV fallback)."""
         try:
             if not self._can_use_keboola():
-                raise RuntimeError("Keboola credentials not configured. Please set 'kbc_url' and 'kbc_token' in .streamlit/secrets.toml")
+                raise RuntimeError("Keboola credentials not configured. Please set 'keboola_url' and 'keboola_token' in .streamlit/secrets.toml")
             
             df = self._read_from_keboola("out.c-002_consolidation_coa.DC_COA")
             self.original_data = df.copy()
@@ -95,10 +95,10 @@ class COADataManager:
         try:
             return (
                 KeboolaStreamlit is not None and
-                'kbc_token' in st.secrets and
-                'kbc_url' in st.secrets and
-                bool(st.secrets['kbc_token']) and
-                bool(st.secrets['kbc_url'])
+                'keboola_token' in st.secrets and
+                'keboola_url' in st.secrets and
+                bool(st.secrets['keboola_token']) and
+                bool(st.secrets['keboola_url'])
             )
         except Exception:
             return False
@@ -113,15 +113,15 @@ class COADataManager:
             client = KeboolaStreamlit(root_url=root_url, token=token)
             return client.read_table(table_id=table)
 
-        return _cached_read_table(st.secrets['kbc_url'], st.secrets['kbc_token'], table_id)
+        return _cached_read_table(st.secrets['keboola_url'], st.secrets['keboola_token'], table_id)
     
     def _write_to_keboola(self, table_id: str, df: pd.DataFrame, primary_key: List[str]) -> None:
         """Write a dataframe to Keboola Storage via keboola-streamlit client."""
         if KeboolaStreamlit is None:
             raise RuntimeError("keboola-streamlit package not installed")
         if not self._can_use_keboola():
-            raise RuntimeError("Keboola credentials not configured. Please set 'kbc_url' and 'kbc_token' in .streamlit/secrets.toml")
-        client = KeboolaStreamlit(root_url=st.secrets['kbc_url'], token=st.secrets['kbc_token'])
+            raise RuntimeError("Keboola credentials not configured. Please set 'keboola_url' and 'keboola_token' in .streamlit/secrets.toml")
+        client = KeboolaStreamlit(root_url=st.secrets['keboola_url'], token=st.secrets['keboola_token'])
         try:
             client.write_table(table_id=table_id, df=df, is_incremental=False)
             return
